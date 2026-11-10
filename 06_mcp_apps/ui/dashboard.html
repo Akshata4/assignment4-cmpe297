@@ -1,0 +1,72 @@
+<!doctype html>
+<html>
+<head>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 12px; color: #1f2937; }
+  .col { display: flex; flex-direction: column; gap: 10px; } .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .row > * { flex: 1 1 140px; }
+  .card, .chart { border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px 12px; }
+  .label { color: #6b7280; font-size: 12px; } .value { font-size: 22px; font-weight: 700; } .delta { color: #059669; }
+  .bars { display: flex; align-items: flex-end; gap: 6px; height: 100px; }
+  .bar { flex: 1; background: #2563eb; border-radius: 3px 3px 0 0; }
+  button { align-self: flex-start; padding: 8px 14px; border: 0; border-radius: 6px; background: #2563eb; color: #fff; font-weight: 600; cursor: pointer; }
+  iframe { width: 100%; height: 150px; border: 2px dashed #2563eb; border-radius: 8px; }
+  #status { color: #065f46; font-weight: 600; }
+  h2 { margin: 0; font-size: 18px; }
+</style>
+</head>
+<body>
+  <!-- DECLARATIVE / HYBRID mode: a renderer app. The tool result carries a catalog spec; this page draws it. -->
+  <div id="root">waiting for the tool result…</div>
+  <div id="status"></div>
+<script>
+  let nextId = 1; const waiting = {};
+  function request(method, params) {
+    const id = nextId++;
+    parent.postMessage({ jsonrpc: "2.0", id, method, params }, "*");
+    return new Promise((resolve) => (waiting[id] = resolve));
+  }
+  window.addEventListener("message", (e) => {
+    const m = e.data;
+    if (m.id && waiting[m.id]) { waiting[m.id](m); delete waiting[m.id]; return; }
+    if (m.method === "ui/notifications/tool-result") {
+      document.getElementById("root").replaceChildren(render(m.params.structuredContent.spec));
+    }
+  });
+
+  function el(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+
+  // The catalog this app understands. Text goes in via textContent only.
+  const catalog = {
+    Column: (p, kids) => { const n = el("div", "col"); n.append(...kids); return n; },
+    Row: (p, kids) => { const n = el("div", "row"); n.append(...kids); return n; },
+    Heading: (p) => el("h2", null, p.text),
+    MetricCard: (p) => { const n = el("div", "card"); n.append(el("div", "label", p.label), el("div", "value", p.value), el("div", "delta", p.delta || "")); return n; },
+    BarChart: (p) => {
+      const n = el("div", "chart"), bars = el("div", "bars"), max = Math.max(...p.data.map((d) => d.value));
+      for (const d of p.data) { const b = el("div", "bar"); b.style.height = (d.value / max) * 100 + "%"; b.title = d.label; bars.append(b); }
+      n.append(el("div", "label", p.title || ""), bars); return n;
+    },
+    Button: (p) => {
+      const b = el("button", null, p.label);
+      // The app asks the HOST to call a tool. The host decides whether to allow it.
+      b.onclick = async () => {
+        const res = await request("tools/call", { name: p.tool, arguments: p.arguments });
+        document.getElementById("status").textContent = res.error ? "Host refused: " + res.error.message : res.result.content[0].text;
+      };
+      return b;
+    },
+    // Hybrid: the open-ended region is ANOTHER sandboxed iframe, nested inside this one.
+    GeneratedView: (p) => { const f = document.createElement("iframe"); f.setAttribute("sandbox", "allow-scripts"); f.srcdoc = p.html; return f; },
+  };
+  function render(node) {
+    const make = catalog[node.type];
+    if (!make) return el("div", null, "unknown component " + node.type);
+    return make(node.props || {}, (node.children || []).map(render));
+  }
+
+  request("ui/initialize", { appInfo: { name: "sales-dashboard", version: "0.1.0" } })
+    .then(() => parent.postMessage({ jsonrpc: "2.0", method: "ui/notifications/initialized" }, "*"));
+</script>
+</body>
+</html>

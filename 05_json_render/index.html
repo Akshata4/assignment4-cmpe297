@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>05 json-render</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/common/style.css">
+</head>
+<body>
+  <header>
+    <h1>05 · json-render: a flat spec, streamed as JSON Patch</h1>
+    <p>Each event is one patch. Missing children render as placeholders until their element arrives.</p>
+  </header>
+  <div class="modes">
+    <button data-mode="static">Static</button>
+    <button data-mode="declarative">Declarative</button>
+    <button data-mode="open_ended">Open-ended</button>
+    <button data-mode="hybrid">Hybrid</button>
+  </div>
+  <div class="grid">
+    <section class="panel"><h3>Patches received</h3><div id="patches" class="log" style="max-height:300px"></div>
+      <h3 style="margin-top:12px">Catalog → system prompt</h3><pre id="prompt"></pre></section>
+    <section class="panel"><h3>Rendered (browser target)</h3><div id="ui"></div>
+      <h3 style="margin-top:12px">Spec state</h3><pre id="state"></pre></section>
+  </div>
+
+<script type="module">
+import { components, h, log, pending, showJson } from "/common/components.js";
+import { applyPatch, getPointer } from "/common/json_patch.js";
+
+const $ = (id) => document.getElementById(id);
+let spec = {}, source = null;
+
+const resolve = (v) => (v && typeof v === "object" && "$state" in v ? getPointer(spec.state, v.$state) : v);
+
+function renderElement(id) {
+  const el = spec.elements?.[id];
+  if (!el) return pending(`element "${id}"`);
+  const props = Object.fromEntries(Object.entries(el.props || {}).map(([k, v]) => [k, resolve(v)]));
+  if (el.children) props.children = el.children.map(renderElement);
+  if (el.type === "Button") props.onClick = () => runAction(props.action);
+  return components[el.type](props);
+}
+
+function render() {
+  $("ui").replaceChildren(spec.root ? renderElement(spec.root) : pending("root"));
+  showJson($("state"), spec.state || {});
+}
+
+async function runAction(action) {
+  log($("patches"), `action → ${JSON.stringify(action)}`);
+  const res = await fetch("/action", { method: "POST", body: JSON.stringify(action) }).then((r) => r.json());
+  log($("patches"), `patch ← ${JSON.stringify(res.patch)}`);
+  spec = applyPatch(spec, res.patch); render();
+}
+
+function start(mode) {
+  source?.close(); spec = {}; render(); $("patches").replaceChildren();
+  document.querySelectorAll(".modes button").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
+  source = new EventSource(`/stream?mode=${mode}`);
+  source.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.errors) { $("ui").replaceChildren(h("pre", { class: "errors" }, msg.errors.join("\n"))); source.close(); return; }
+    if (msg.done) { source.close(); log($("patches"), "done"); return; }
+    const op = msg.patch[0];
+    log($("patches"), `${op.op} ${op.path}`);
+    spec = applyPatch(spec, msg.patch);
+    render();
+  };
+  source.onerror = () => source.close();
+}
+
+fetch("/prompt").then((r) => r.json()).then((p) => ($("prompt").textContent = p.prompt));
+document.querySelectorAll(".modes button").forEach((b) => b.addEventListener("click", () => start(b.dataset.mode)));
+start("declarative");
+</script>
+</body>
+</html>

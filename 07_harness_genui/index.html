@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>07 Harness GenUI</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/common/style.css">
+</head>
+<body>
+  <header>
+    <h1>07 · Harness integration: UI as a tool in the agent loop</h1>
+    <p>Left: the loop's trace (model turns, tool calls, results). Right: whatever the render tools drew.</p>
+  </header>
+  <div class="modes">
+    <button data-mode="static">Static</button>
+    <button data-mode="declarative">Declarative (with self-correction)</button>
+    <button data-mode="open_ended">Open-ended</button>
+    <button data-mode="hybrid">Hybrid</button>
+  </div>
+  <div class="grid">
+    <section class="panel"><h3>Agent loop trace</h3><pre id="trace"></pre></section>
+    <section class="panel"><h3>UI surface</h3><div id="ui"></div></section>
+  </div>
+
+<script type="module">
+import { components, pending } from "/common/components.js";
+
+const $ = (id) => document.getElementById(id);
+let source = null;
+
+function renderSpec(spec, id) {
+  const el = spec.elements[id];
+  if (!el) return pending(id);
+  const props = { ...(el.props || {}) };
+  if (el.children) props.children = el.children.map((c) => renderSpec(spec, c));
+  return components[el.type](props);
+}
+
+const surfaces = {
+  component: (p) => components[p.name](p.props),
+  html: (p) => components.GeneratedView({ html: p.html, height: 200 }),
+  spec: (p) => renderSpec(p, p.root),
+};
+
+function start(mode) {
+  source?.close(); $("trace").textContent = ""; $("ui").replaceChildren();
+  document.querySelectorAll(".modes button").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
+  source = new EventSource(`/run?mode=${mode}`);
+  source.onmessage = (e) => {
+    const ev = JSON.parse(e.data);
+    if (ev.type === "trace") $("trace").textContent += ev.text + "\n";
+    if (ev.type === "ui") $("ui").replaceChildren(surfaces[ev.kind](ev.payload));
+    if (ev.type === "done") source.close();
+  };
+  source.onerror = () => source.close();
+}
+document.querySelectorAll(".modes button").forEach((b) => b.addEventListener("click", () => start(b.dataset.mode)));
+start("declarative");
+</script>
+</body>
+</html>

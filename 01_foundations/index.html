@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>01 Foundations</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/common/style.css">
+</head>
+<body>
+  <header>
+    <h1>01 · Foundations: four generation modes</h1>
+    <p>Same question ("How did sales go this week?"), four levels of model freedom.</p>
+  </header>
+  <div class="modes">
+    <button data-mode="static">Static</button>
+    <button data-mode="declarative">Declarative</button>
+    <button data-mode="open_ended">Open-ended</button>
+    <button data-mode="hybrid">Hybrid</button>
+    <button data-mode="declarative" data-broken="1">Declarative (invalid reply)</button>
+  </div>
+  <div class="grid">
+    <section class="panel"><h3>What the agent returned</h3><pre id="raw"></pre></section>
+    <section class="panel"><h3>What the user sees</h3><div id="ui"></div></section>
+  </div>
+  <section class="panel" style="margin-top:12px"><h3>Log</h3><div id="log" class="log"></div></section>
+
+<script type="module">
+import { components, h, showJson, log } from "/common/components.js";
+
+const raw = document.getElementById("raw");
+const ui = document.getElementById("ui");
+const logEl = document.getElementById("log");
+
+// Turn one node of the declarative tree into DOM, using ONLY the catalog.
+function renderNode(node) {
+  const make = components[node.type];
+  const props = { ...(node.props || {}) };
+  if (node.type === "Button") props.onClick = () => sendAction(props.action);
+  if (node.children) props.children = node.children.map(renderNode);
+  return make(props);
+}
+
+async function sendAction(name) {
+  log(logEl, `click -> POST /api/action {name: "${name}"}`);
+  const res = await fetch("/api/action", { method: "POST", body: JSON.stringify({ name }) }).then((r) => r.json());
+  log(logEl, res.ok ? `server: ${res.message}` : `server refused: ${res.error}`);
+}
+
+async function load(mode, broken) {
+  document.querySelectorAll(".modes button").forEach((b) =>
+    b.classList.toggle("active", b.dataset.mode === mode && !!b.dataset.broken === !!broken));
+  const data = await fetch(`/api/ui?mode=${mode}${broken ? "&broken=1" : ""}`).then((r) => r.json());
+  showJson(raw, data.reply);
+  ui.replaceChildren();
+  log(logEl, `mode=${mode}: agent reply received, validation errors: ${data.errors.length}`);
+
+  if (data.errors.length) {  // never render something that failed the contract
+    ui.append(h("div", { class: "errors" }, "Rejected, not rendered:"), h("pre", {}, data.errors.join("\n")));
+    return;
+  }
+  if (mode === "static") ui.append(components[data.reply.component](data.reply.props));
+  else if (mode === "open_ended") ui.append(components.GeneratedView({ html: data.reply.html, height: 200 }));
+  else ui.append(renderNode(data.reply.tree));  // declarative + hybrid
+}
+
+document.querySelectorAll(".modes button").forEach((b) =>
+  b.addEventListener("click", () => load(b.dataset.mode, b.dataset.broken)));
+load("static");
+</script>
+</body>
+</html>

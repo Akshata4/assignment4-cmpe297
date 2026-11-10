@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>04 OpenUI Lang</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/common/style.css">
+</head>
+<body>
+  <header>
+    <h1>04 · OpenUI Lang: a UI as a few lines of code</h1>
+    <p>Lines stream in one by one. <code>root</code> arrives first; unresolved references show as placeholders until their line lands.</p>
+  </header>
+  <div class="modes">
+    <button data-mode="static">Static</button>
+    <button data-mode="declarative">Declarative</button>
+    <button data-mode="open_ended">Open-ended (HtmlArtifact)</button>
+    <button data-mode="hybrid">Hybrid</button>
+  </div>
+  <div class="grid">
+    <section class="panel"><h3>Program so far</h3><pre id="program"></pre><div id="errors" class="errors"></div></section>
+    <section class="panel"><h3>Rendered</h3><div id="ui"></div></section>
+  </div>
+  <section class="panel" style="margin-top:12px"><h3>Size: OpenUI Lang vs JSON tree (same dashboard)</h3><pre id="compare"></pre></section>
+  <section class="panel" style="margin-top:12px"><h3>Log</h3><div id="log" class="log"></div></section>
+
+<script type="module">
+import { components, h, log, pending } from "/common/components.js";
+import { parse } from "./openui_lang.js";
+
+const $ = (id) => document.getElementById(id);
+let source = null, text = "";
+
+// Render a value: references resolve to other statements (or a placeholder).
+function renderValue(v, statements, seen) {
+  if (v && v.$ref) {
+    if (seen.has(v.$ref)) return h("div", { class: "errors" }, `cycle at ${v.$ref}`);
+    const target = statements[v.$ref];
+    return target ? renderValue(target, statements, new Set([...seen, v.$ref])) : pending(v.$ref);
+  }
+  if (v && v.component) {
+    const props = { ...v.props };
+    if (props.children) props.children = props.children.map((c) => renderValue(c, statements, seen));
+    if (v.component === "Button") props.onClick = () => log($("log"), `action "${props.action}" sent to the application`);
+    if (v.component === "HtmlArtifact") {
+      return h("div", {}, [h("div", { class: "c-label" }, props.title), components.GeneratedView({ html: props.html, height: 170 })]);
+    }
+    return components[v.component](props);
+  }
+  return h("span", {}, String(v));
+}
+
+function render() {
+  $("program").textContent = text.replace(/"<!doctype[\s\S]*?<\/html>"/gi, '"<!doctype html>…(HTML omitted)…"');
+  const { statements, errors } = parse(text);
+  $("errors").textContent = errors.join("\n");
+  $("ui").replaceChildren(statements.root ? renderValue({ $ref: "root" }, statements, new Set()) : pending("root"));
+}
+
+function start(mode) {
+  source?.close(); text = ""; render();
+  document.querySelectorAll(".modes button").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
+  source = new EventSource(`/stream?mode=${mode}`);
+  source.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.done) { source.close(); log($("log"), `${mode}: stream finished`); return; }
+    text += (text ? "\n" : "") + msg.line;
+    log($("log"), `line received: ${msg.line.slice(0, 70)}${msg.line.length > 70 ? "…" : ""}`);
+    render();
+  };
+  source.onerror = () => source.close();
+}
+
+fetch("/compare").then((r) => r.json()).then((c) => $("compare").textContent = JSON.stringify(c, null, 2));
+document.querySelectorAll(".modes button").forEach((b) => b.addEventListener("click", () => start(b.dataset.mode)));
+start("declarative");
+</script>
+</body>
+</html>

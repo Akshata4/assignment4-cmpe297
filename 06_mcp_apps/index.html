@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>06 MCP Apps Host</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/common/style.css">
+</head>
+<body>
+  <header>
+    <h1>06 · MCP Apps: a mini host</h1>
+    <p>This page plays the role of Claude / ChatGPT / VS Code. In a real host the <em>model</em> picks the tool; here you click it.</p>
+  </header>
+  <div class="modes" id="tools"></div>
+  <div class="grid">
+    <section class="panel"><h3>JSON-RPC traffic (host ⇄ server, host ⇄ app)</h3><div id="log" class="log" style="max-height:460px"></div></section>
+    <section class="panel"><h3>Mounted app (sandboxed iframe)</h3><div id="ui"></div>
+      <h3 style="margin-top:12px">Text the model sees</h3><pre id="content"></pre></section>
+  </div>
+
+<script type="module">
+import { h, log, sandboxedFrame, showJson } from "/common/components.js";
+
+const $ = (id) => document.getElementById(id);
+const MODE_OF = { show_sales_card: "static", show_sales_dashboard: "declarative", show_custom_view: "open-ended", show_hybrid_dashboard: "hybrid" };
+const APP_MAY_CALL = new Set(["reorder_product"]);  // host policy: what an app is allowed to call
+let rpcId = 1, frame = null, lastResult = null;
+
+async function rpc(method, params) {
+  log($("log"), `host → server  ${method} ${params ? JSON.stringify(params).slice(0, 80) : ""}`);
+  const res = await fetch("/mcp", { method: "POST", body: JSON.stringify({ jsonrpc: "2.0", id: rpcId++, method, params }) }).then((r) => r.json());
+  log($("log"), `server → host  ${res.error ? "error " + res.error.message : Object.keys(res.result).join(", ")}`);
+  return res;
+}
+
+// Messages FROM the app iframe.
+window.addEventListener("message", async (e) => {
+  if (!frame || e.source !== frame.contentWindow) return;  // only trust our own frame
+  const m = e.data;
+  log($("log"), `app → host  ${m.method}`);
+  const reply = (body) => frame.contentWindow.postMessage({ jsonrpc: "2.0", id: m.id, ...body }, "*");
+  if (m.method === "ui/initialize") {
+    reply({ result: { hostInfo: { name: "cmpe297-mini-host" }, hostContext: { theme: "light" } } });
+  } else if (m.method === "ui/notifications/initialized") {
+    log($("log"), "host → app  ui/notifications/tool-result");
+    frame.contentWindow.postMessage({ jsonrpc: "2.0", method: "ui/notifications/tool-result", params: lastResult }, "*");
+  } else if (m.method === "tools/call") {
+    if (!APP_MAY_CALL.has(m.params.name)) return reply({ error: { code: -32000, message: `host policy blocks ${m.params.name}` } });
+    const res = await rpc("tools/call", m.params);
+    reply(res.error ? { error: res.error } : { result: res.result });
+  } else if (m.id) {
+    reply({ error: { code: -32601, message: "not supported by this host" } });
+  }
+});
+
+async function callTool(name) {
+  document.querySelectorAll("#tools button").forEach((b) => b.classList.toggle("active", b.dataset.name === name));
+  const call = await rpc("tools/call", { name, arguments: {} });
+  lastResult = call.result;
+  showJson($("content"), call.result.content);
+  const uri = call.result._meta?.ui?.resourceUri;
+  if (!uri) return;
+  const read = await rpc("resources/read", { uri });
+  frame = sandboxedFrame(read.result.contents[0].text, 560);  // opaque origin + CSP: no network
+  $("ui").replaceChildren(frame);
+}
+
+// Discover tools like a host does: initialize, then tools/list.
+await rpc("initialize", { protocolVersion: "2025-06-18", clientInfo: { name: "cmpe297-mini-host" }, capabilities: {} });
+const { result } = await rpc("tools/list");
+for (const t of result.tools.filter((t) => t._meta?.ui)) {
+  const b = h("button", { "data-name": t.name, onclick: () => callTool(t.name) }, `${MODE_OF[t.name]}: ${t.name}`);
+  $("tools").append(b);
+}
+callTool("show_sales_card");
+</script>
+</body>
+</html>

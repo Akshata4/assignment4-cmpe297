@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+<head>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 12px; color: #1f2937; }
+  .card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 14px; display: inline-block; min-width: 220px; }
+  .label { color: #6b7280; font-size: 12px; } .value { font-size: 28px; font-weight: 700; } .delta { color: #059669; }
+</style>
+</head>
+<body>
+  <!-- STATIC mode: this HTML was written ahead of time. Only the numbers come from the tool result. -->
+  <div class="card"><div class="label" id="label">…</div><div class="value" id="value">…</div><div class="delta" id="delta"></div></div>
+<script>
+  // --- minimal MCP Apps bridge (JSON-RPC over postMessage to the host) ---
+  let nextId = 1; const waiting = {};
+  function request(method, params) {
+    const id = nextId++;
+    parent.postMessage({ jsonrpc: "2.0", id, method, params }, "*");
+    return new Promise((resolve) => (waiting[id] = resolve));
+  }
+  window.addEventListener("message", (e) => {
+    const m = e.data;
+    if (m.id && waiting[m.id]) { waiting[m.id](m); delete waiting[m.id]; return; }
+    if (m.method === "ui/notifications/tool-result") render(m.params.structuredContent);
+  });
+  function render(data) {
+    document.getElementById("label").textContent = data.label;
+    document.getElementById("value").textContent = data.value;
+    document.getElementById("delta").textContent = data.delta || "";
+  }
+  request("ui/initialize", { appInfo: { name: "sales-card", version: "0.1.0" } })
+    .then(() => parent.postMessage({ jsonrpc: "2.0", method: "ui/notifications/initialized" }, "*"));
+</script>
+</body>
+</html>

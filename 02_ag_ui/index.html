@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>02 AG-UI</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/common/style.css">
+</head>
+<body>
+  <header>
+    <h1>02 · AG-UI: one run, one stream of typed events</h1>
+    <p>The page POSTs a RunAgentInput to <code>/agent</code> and reacts to each event as it arrives.</p>
+  </header>
+  <div class="modes">
+    <button data-mode="static">Static (tool call → my component)</button>
+    <button data-mode="declarative">Declarative (state snapshot + deltas)</button>
+    <button data-mode="open_ended">Open-ended (streamed HTML)</button>
+    <button data-mode="hybrid">Hybrid</button>
+  </div>
+  <div class="grid">
+    <section class="panel"><h3>Events (newest first)</h3><div id="events" class="log" style="max-height:440px"></div></section>
+    <section class="panel">
+      <h3>Assistant text</h3><p id="chat"></p>
+      <h3>UI</h3><div id="ui"></div>
+      <h3 style="margin-top:12px">Shared state</h3><pre id="state">{}</pre>
+    </section>
+  </div>
+
+<script type="module">
+import { components, showJson, log } from "/common/components.js";
+import { applyPatch } from "/common/json_patch.js";
+
+const $ = (id) => document.getElementById(id);
+let mode = "static";
+let state = {};
+const toolArgs = {};  // toolCallId -> {name, args: "partial json"}
+
+// Static mode: the agent names a tool, the FRONTEND owns the component for it.
+const toolRenderers = {
+  render_metric_card: (args) => components.MetricCard(args),
+  render_html: (args) => components.GeneratedView({ html: args.html, height: 200 }),
+};
+
+function renderNode(node) {
+  const props = { ...(node.props || {}) };
+  if (node.type === "Button") props.onClick = () => run({ action: props.action });
+  if (node.children) props.children = node.children.map(renderNode);
+  return components[node.type](props);
+}
+
+function renderState() {
+  showJson($("state"), state);
+  if (state.dashboard) $("ui").replaceChildren(renderNode(state.dashboard));
+}
+
+function handle(event) {
+  const brief = { ...event }; delete brief.timestamp;
+  if (brief.delta && typeof brief.delta === "string" && brief.delta.length > 60) brief.delta = brief.delta.slice(0, 60) + "…";
+  if (brief.snapshot) brief.snapshot = "{…}";
+  log($("events"), JSON.stringify(brief));
+
+  switch (event.type) {
+    case "TEXT_MESSAGE_START": $("chat").textContent = ""; break;
+    case "TEXT_MESSAGE_CONTENT": $("chat").textContent += event.delta; break;
+    case "TOOL_CALL_START": toolArgs[event.toolCallId] = { name: event.toolCallName, args: "" }; break;
+    case "TOOL_CALL_ARGS": toolArgs[event.toolCallId].args += event.delta; break;
+    case "TOOL_CALL_END": {
+      const call = toolArgs[event.toolCallId];
+      const render = toolRenderers[call.name];
+      if (render) $("ui").replaceChildren(render(JSON.parse(call.args)));
+      break;
+    }
+    case "STATE_SNAPSHOT": state = event.snapshot; renderState(); break;
+    case "STATE_DELTA": state = applyPatch(state, event.delta); renderState(); break;
+    case "RUN_ERROR": $("chat").textContent = "Error: " + event.message; break;
+  }
+}
+
+// Read an SSE stream from a POST (EventSource only supports GET).
+async function run(extra = {}) {
+  const input = { threadId: "thread_1", runId: "run_" + Date.now(), messages: [], state,
+                  tools: [], context: [], forwardedProps: { mode, ...extra } };
+  const res = await fetch("/agent", { method: "POST", body: JSON.stringify(input) });
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += value;
+    const parts = buffer.split("\n\n");
+    buffer = parts.pop();
+    for (const p of parts) if (p.startsWith("data: ")) handle(JSON.parse(p.slice(6)));
+  }
+}
+
+document.querySelectorAll(".modes button").forEach((b) => b.addEventListener("click", () => {
+  mode = b.dataset.mode; state = {};
+  document.querySelectorAll(".modes button").forEach((x) => x.classList.toggle("active", x === b));
+  $("ui").replaceChildren(); $("events").replaceChildren(); showJson($("state"), {});
+  run();
+}));
+document.querySelector(".modes button").click();
+</script>
+</body>
+</html>

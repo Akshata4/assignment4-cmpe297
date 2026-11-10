@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>03 A2UI</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/common/style.css">
+</head>
+<body>
+  <header>
+    <h1>03 · A2UI: a flat component list + a separate data model</h1>
+    <p>Watch the last two messages: only the data changes, the layout is not resent.</p>
+  </header>
+  <div class="modes">
+    <button data-mode="static">Static (template + data)</button>
+    <button data-mode="declarative">Declarative</button>
+    <button data-mode="open_ended">Open-ended</button>
+    <button data-mode="hybrid">Hybrid</button>
+  </div>
+  <div class="grid">
+    <section class="panel"><h3>A2UI messages (in order)</h3><pre id="messages"></pre></section>
+    <section class="panel">
+      <h3>Surface "main"</h3><div id="ui"></div>
+      <h3 style="margin-top:12px">Data model</h3><pre id="data">{}</pre>
+    </section>
+  </div>
+  <section class="panel" style="margin-top:12px"><h3>Client → server actions</h3><div id="log" class="log"></div></section>
+
+<script type="module">
+import { components, showJson, log, pending } from "/common/components.js";
+import { getPointer, setPointer } from "/common/json_patch.js";
+
+const $ = (id) => document.getElementById(id);
+let surface = null;   // { catalogId, components: Map(id -> component), data: {} }
+let source = null;
+
+// A value is either a literal or a binding {path: "/x"} into the data model.
+const resolve = (v) => (v && typeof v === "object" && "path" in v ? getPointer(surface.data, v.path) : v);
+
+function renderId(id) {
+  const c = surface.components.get(id);
+  if (!c) return pending(`component "${id}"`);
+  const { id: _, component, children, action, ...rest } = c;
+  const props = {};
+  for (const [k, v] of Object.entries(rest)) props[k] = resolve(v);
+  if (children) props.children = children.map(renderId);
+  if (component === "TextField") {  // two-way binding: typing writes to the data model
+    props.onInput = (val) => { surface.data = setPointer(surface.data, c.value.path, val); showJson($("data"), surface.data); };
+  }
+  if (component === "Button") props.onClick = () => sendAction(id, action.event);
+  return components[component](props);
+}
+
+function render() {
+  showJson($("data"), surface.data);
+  $("ui").replaceChildren(surface.components.size ? renderId("root") : pending("components"));
+}
+
+function apply(message) {
+  $("messages").textContent += JSON.stringify(message).slice(0, 220) + "\n\n";
+  if (message.createSurface) surface = { catalogId: message.createSurface.catalogId, components: new Map(), data: {} };
+  if (message.updateComponents) for (const c of message.updateComponents.components) surface.components.set(c.id, c);
+  if (message.updateDataModel) {
+    const { path, value } = message.updateDataModel;  // "/" means the whole data model
+    surface.data = path === "/" ? value : setPointer(surface.data, path, value);
+  }
+  if (message.deleteSurface) surface = null;
+  if (surface) render(); else $("ui").replaceChildren();
+}
+
+async function sendAction(sourceComponentId, event) {
+  // Resolve the action context from the data model AT CLICK TIME.
+  const context = Object.fromEntries(Object.entries(event.context || {}).map(([k, v]) => [k, resolve(v)]));
+  const action = { name: event.name, surfaceId: "main", sourceComponentId, timestamp: new Date().toISOString(), context };
+  log($("log"), "action → " + JSON.stringify(action));
+  const res = await fetch("/action", { method: "POST", body: JSON.stringify({ action }) }).then((r) => r.json());
+  res.messages.forEach(apply);
+}
+
+function start(mode) {
+  source?.close();
+  $("messages").textContent = ""; $("ui").replaceChildren(); surface = null;
+  document.querySelectorAll(".modes button").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
+  source = new EventSource(`/a2ui?mode=${mode}`);
+  source.onmessage = (e) => apply(JSON.parse(e.data));
+  source.onerror = () => source.close();  // server closed the stream: we are done
+}
+
+document.querySelectorAll(".modes button").forEach((b) => b.addEventListener("click", () => start(b.dataset.mode)));
+start("static");
+</script>
+</body>
+</html>
