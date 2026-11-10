@@ -9,13 +9,13 @@ Reference course: [dlmastery/simple-coding-harness · genui](https://github.com/
 
 | # | Assignment topic | Code | Video |
 |---|---|---|---|
-| 1 | Foundations: static, declarative, open-ended and hybrid UX | [`01_foundations`](01_foundations/) | _Video link coming soon_ |
-| 2 | AG-UI (agent ⇄ UI event protocol) | [`02_ag_ui`](02_ag_ui/) | _Video link coming soon_ |
-| 3 | A2UI (Google's declarative UI protocol) | [`03_a2ui`](03_a2ui/) | _Video link coming soon_ |
-| 4 | OpenUI (OpenUI Lang) | [`04_openui_lang`](04_openui_lang/) | _Video link coming soon_ |
-| 5 | json-render | [`05_json_render`](05_json_render/) | _Video link coming soon_ |
-| 6 | MCP Apps | [`06_mcp_apps`](06_mcp_apps/) | _Video link coming soon_ |
-| 7 | Harness integration | [`07_harness_genui`](07_harness_genui/) | _Video link coming soon_ |
+| 1 | Foundations: static, declarative, open-ended and hybrid UX | [`01_foundations`](01_foundations/) | [▶ Watch video 1](https://www.youtube.com/watch?v=VWeCEH-ycGY) |
+| 2 | AG-UI (agent ⇄ UI event protocol) | [`02_ag_ui`](02_ag_ui/) | [▶ Watch video 2](https://www.youtube.com/watch?v=PFH9yRJJxeg) |
+| 3 | A2UI (Google's declarative UI protocol) | [`03_a2ui`](03_a2ui/) | [▶ Watch video 3](https://www.youtube.com/watch?v=GGK-tBdYchU&t=309s) |
+| 4 | OpenUI (OpenUI Lang) | [`04_openui_lang`](04_openui_lang/) | [▶ Watch video 4](https://www.youtube.com/watch?v=jFmRu_yC_vs) |
+| 5 | json-render | [`05_json_render`](05_json_render/) | [▶ Watch video 5](https://www.youtube.com/watch?v=erAqDVXMOTQ) |
+| 6 | MCP Apps | [`06_mcp_apps`](06_mcp_apps/) | [▶ Watch video 6](https://www.youtube.com/watch?v=VWeCEH-ycGY) |
+| 7 | Harness integration | [`07_harness_genui`](07_harness_genui/) | [▶ Watch video 7](https://www.youtube.com/watch?v=GGK-tBdYchU&t=309s) |
 
 ## The four modes (used in every topic)
 
